@@ -1,6 +1,5 @@
+import { z } from "sitescrape";
 import type { CheerioAPI } from "cheerio";
-import type { Element } from "domhandler";
-import { z } from "zod";
 
 export const BASE = "https://books.toscrape.com/catalogue/";
 
@@ -37,7 +36,7 @@ export function slugFromHref(href: string): string {
 export function parseCards($: CheerioAPI, pageUrl: string): BookCard[] {
   return $("article.product_pod")
     .toArray()
-    .map((el: Element) => {
+    .map((el) => {
       const card = $(el);
       const link = card.find("h3 a");
       const href = link.attr("href") ?? "";
