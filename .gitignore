@@ -3,3 +3,4 @@ recordings/
 .env
 *.har
 sessions/
+.sitescrape/
