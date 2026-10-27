@@ -34,7 +34,7 @@ export function sessionStore(cfg: RuntimeConfig): SessionStore {
   return new SessionStore(cfg.sessionDir, cfg.sessionKey ?? "");
 }
 
-/** Session files are keyed by the catalog site folder, e.g. "resy.com". */
+/** Session files are keyed by the catalog site folder, e.g. "example.com". */
 export function siteKey(site: string): string {
   return site.toLowerCase();
 }

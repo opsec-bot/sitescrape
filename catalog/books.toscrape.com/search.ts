@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { defineEndpoint } from "../../src/endpoint.ts";
+import { defineEndpoint, z } from "sitescrape";
 import { bookCard, pageUrl, parseCards, parseTotalPages, type BookCard } from "./_shared.ts";
 
 // The site has no search box, so this scans the catalogue pages a few at a time and filters by title.

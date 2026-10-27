@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { defineEndpoint } from "../../src/endpoint.ts";
+import { defineEndpoint, z } from "sitescrape";
 import { bookCard, pageUrl, parseCards, parseTotalPages } from "./_shared.ts";
 
 export default defineEndpoint({
