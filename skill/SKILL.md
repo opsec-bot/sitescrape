@@ -21,6 +21,8 @@ You write endpoints for the sitescrape catalog. The user's machine does the fetc
    - `example` must be a real input that returns data today. Probes use it.
    - Shared parsing goes in `catalog/<host>/_shared.ts`.
    - Set `kind: "action"` for anything that changes state on the site (posts, bookings, purchases).
+   - Data behind a login: set `session: true`. The user runs `sitescrape login <url>` once; cookies, user agent and proxy IP are then handled for you. Never ask for or store passwords.
+   - A captcha guards a request: get the site key from the page and call `await ctx.solveCaptcha({ type: "recaptcha_v2" | "recaptcha_v3" | "hcaptcha" | "turnstile", websiteURL, websiteKey })`, then send the token the way the page does. Image captchas: `{ type: "image", body: base64 }`.
    - Validate ids in `input` with a regex so user input never builds arbitrary URLs.
 6. **Verify.** `sitescrape call <host>/<name> '<example json>'`. Output must pass the schema. Then save the fetched page or JSON to `test/fixtures/` and add a test that runs the endpoint on the fixture.
 
@@ -28,4 +30,4 @@ You write endpoints for the sitescrape catalog. The user's machine does the fetc
 
 - Secrets (cookies, tokens, API keys) never go in catalog files, fixtures or digests. Endpoints get auth from the context.
 - Action endpoints and logged-in endpoints: test accounts only. Ask the user before running any action against a live site.
-- If the site sits behind a captcha or bot wall the recording cannot get past, say so. Do not try to defeat it in endpoint code.
+- Fingerprint-based bot walls (no visible captcha, just blocks) are out of scope. Say so instead of guessing headers until something works.
