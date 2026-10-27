@@ -6,6 +6,8 @@ import { Context } from "./context.ts";
 import { EndpointError, invoke } from "./endpoint.ts";
 import { find, loadCatalog } from "./registry.ts";
 import { record, writeDigest } from "./record.ts";
+import { createServer } from "./serve.ts";
+import { buildMcpServer } from "./mcp.ts";
 
 const HELP = `sitescrape: turn a website into a typed API
 
@@ -14,8 +16,10 @@ Usage:
   sitescrape digest <recording dir | file.har> [--host example.com]
   sitescrape list
   sitescrape call <site/endpoint> ['{"json":"input"}']
+  sitescrape serve [--port 8787] [--host 127.0.0.1]   REST: GET / lists, POST /<site>/<endpoint> calls
+  sitescrape mcp                                      MCP server on stdio, one tool per endpoint
 
-Env (.env is loaded if present): PROXY_URL, SITESCRAPE_CATALOG
+Env (.env is loaded if present): PROXY_URL, SITESCRAPE_CATALOG, SITESCRAPE_TOKEN (bearer token for serve)
 `;
 
 const PKG_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -42,6 +46,7 @@ async function main(argv: string[]): Promise<number> {
       headless: { type: "boolean" },
       channel: { type: "string" },
       host: { type: "string", multiple: true },
+      port: { type: "string" },
     },
   });
 
@@ -85,6 +90,26 @@ async function main(argv: string[]): Promise<number> {
       const result = await invoke(entry.endpoint, new Context(), raw ? JSON.parse(raw) : {});
       console.log(JSON.stringify(result, null, 2));
       return 0;
+    }
+    case "serve": {
+      const entries = await loadCatalog(catalogDir());
+      const port = Number(values.port ?? 8787);
+      const host = values.host?.[0] ?? "127.0.0.1";
+      const token = process.env.SITESCRAPE_TOKEN || undefined;
+      if (host !== "127.0.0.1" && host !== "localhost" && !token) {
+        console.error("refusing to listen on a public interface without SITESCRAPE_TOKEN");
+        return 1;
+      }
+      createServer(entries, { token }).listen(port, host, () => {
+        console.log(`sitescrape serving ${entries.length} endpoints on http://${host}:${port}`);
+      });
+      return new Promise<number>(() => {});
+    }
+    case "mcp": {
+      const { serveStdio } = await import("@modelcontextprotocol/server/stdio");
+      const entries = await loadCatalog(catalogDir());
+      serveStdio(() => buildMcpServer(entries));
+      return new Promise<number>(() => {});
     }
     default:
       return usage(cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0);
