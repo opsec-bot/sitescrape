@@ -1,4 +1,6 @@
 import * as cheerio from "cheerio";
+import type { CookieJar } from "tough-cookie";
+import type { CaptchaSolver, CaptchaTask } from "./captcha.ts";
 import { EndpointError } from "./endpoint.ts";
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -11,6 +13,9 @@ export interface ContextOptions {
   retries?: number;
   /** Base delay for retry backoff, in ms. */
   backoffMs?: number;
+  /** Cookies sent with matching requests and updated from Set-Cookie. */
+  jar?: CookieJar;
+  captcha?: CaptchaSolver;
 }
 
 const DEFAULT_HEADERS = {
@@ -26,22 +31,39 @@ export class Context {
   private readonly headers: Record<string, string>;
   private readonly retries: number;
   private readonly backoffMs: number;
+  readonly jar?: CookieJar;
+  private readonly solver?: CaptchaSolver;
 
   constructor(opts: ContextOptions = {}) {
     this.doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
     this.headers = { ...DEFAULT_HEADERS, ...opts.headers };
     this.retries = opts.retries ?? 2;
     this.backoffMs = opts.backoffMs ?? 500;
+    this.jar = opts.jar;
+    this.solver = opts.captcha;
+  }
+
+  /** Solve a captcha with the configured provider (CAPTCHA_PROVIDER + CAPTCHA_API_KEY). */
+  async solveCaptcha(task: CaptchaTask): Promise<string> {
+    if (!this.solver) throw new EndpointError("this endpoint needs a captcha solver: set CAPTCHA_PROVIDER and CAPTCHA_API_KEY", "config");
+    return this.solver.solve(task);
   }
 
   /** fetch with default headers, retrying network errors and retryable statuses. */
   async fetch(url: string, init: RequestInit = {}): Promise<Response> {
-    const headers = { ...this.headers, ...(init.headers as Record<string, string> | undefined) };
+    const headers: Record<string, string> = { ...this.headers, ...(init.headers as Record<string, string> | undefined) };
+    if (this.jar) {
+      const cookie = await this.jar.getCookieString(url);
+      if (cookie) headers.cookie = headers.cookie ? `${headers.cookie}; ${cookie}` : cookie;
+    }
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       if (attempt > 0) await sleep(this.backoffMs * 2 ** (attempt - 1));
       try {
         const res = await this.doFetch(url, { ...init, headers });
+        if (this.jar) {
+          for (const c of res.headers.getSetCookie()) await this.jar.setCookie(c, url, { ignoreError: true });
+        }
         if (!RETRY_STATUS.has(res.status) || attempt === this.retries) return res;
         lastError = new EndpointError(`HTTP ${res.status} from ${url}`, "upstream");
       } catch (err) {
