@@ -19,6 +19,7 @@ You write endpoints for the sitescrape catalog. The user's machine does the fetc
 5. **Write `catalog/<host>/<name>.ts`.** One endpoint per file, default export of `defineEndpoint`:
    - `input` and `output` are zod schemas. Snake_case output keys. Numbers as numbers, not strings.
    - `example` must be a real input that returns data today. Probes use it.
+   - `source`: the page to re-record when the endpoint breaks, if it is not the homepage.
    - Shared parsing goes in `catalog/<host>/_shared.ts`.
    - Set `kind: "action"` for anything that changes state on the site (posts, bookings, purchases).
    - Data behind a login: set `session: true`. The user runs `sitescrape login <url>` once; cookies, user agent and proxy IP are then handled for you. Never ask for or store passwords.
