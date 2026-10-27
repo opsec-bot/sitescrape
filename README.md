@@ -12,8 +12,6 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 }
 ```
 
-> Early work in progress, not yet v1. Recording, digesting, calling, REST, MCP, proxies, captcha solving, saved logins, health checks and self-healing all work.
-
 ## How it works
 
 1. **Record.** `sitescrape record <url>` opens a browser and saves every request as a HAR file while you do the task.
@@ -26,7 +24,7 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 Requires Node 22+.
 
 ```
-git clone <repo> && cd sitescrape
+git clone https://github.com/opsec-bot/sitescrape && cd sitescrape
 npm install
 npx playwright install chromium   # optional: falls back to installed Chrome or Edge
 node bin/sitescrape.mjs list
@@ -91,7 +89,7 @@ Nothing is committed for you. To check daily, schedule `sitescrape probe --heal`
 
 ## Catalog
 
-This repo ships one example site, `books.toscrape.com` (a sandbox built for scraping practice). Endpoints for real sites live in a separate catalog repo: install sitescrape there and run it from that folder, or point `SITESCRAPE_CATALOG` at its `catalog/` directory. Fork it to change an endpoint, open a pull request to share one.
+This repo ships one example site, `books.toscrape.com` (a sandbox built for scraping practice). Endpoints for real sites live in [sitescrape-catalog](https://github.com/opsec-bot/sitescrape-catalog): install sitescrape there and run it from that folder, or point `SITESCRAPE_CATALOG` at its `catalog/` directory. Fork it to change an endpoint, open a pull request to share one.
 
 ## Writing an endpoint
 

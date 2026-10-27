@@ -1,6 +1,6 @@
 {
   "name": "sitescrape",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Turn any website into a typed API and MCP tools by replaying its own network calls.",
   "type": "module",
   "exports": {
@@ -38,5 +38,18 @@
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/opsec-bot/sitescrape.git"
+  },
+  "homepage": "https://github.com/opsec-bot/sitescrape#readme",
+  "keywords": [
+    "scraping",
+    "api",
+    "mcp",
+    "har",
+    "reverse-engineering",
+    "claude-code"
+  ]
 }
