@@ -8,11 +8,19 @@ import { find, type Entry } from "./registry.ts";
 export interface ServeOptions {
   /** When set, every request must send `Authorization: Bearer <token>`. */
   token?: string;
-  makeContext?: () => Context;
+  /** How a call runs. Defaults to a plain context; the CLI passes the proxy/captcha/session runtime. */
+  run?: (entry: Entry, input: unknown) => Promise<unknown>;
   maxBodyBytes?: number;
 }
 
-const STATUS: Record<ErrorCode, number> = { bad_input: 400, not_found: 404, bad_output: 502, upstream: 502 };
+const STATUS: Record<ErrorCode, number> = {
+  bad_input: 400,
+  not_found: 404,
+  auth_required: 401,
+  bad_output: 502,
+  upstream: 502,
+  config: 500,
+};
 
 /** JSON Schema view of the catalog, used by GET / and handy for generating clients. */
 export function describeCatalog(entries: Entry[]) {
@@ -27,7 +35,7 @@ export function describeCatalog(entries: Entry[]) {
 }
 
 export function createServer(entries: Entry[], opts: ServeOptions = {}): http.Server {
-  const makeContext = opts.makeContext ?? (() => new Context());
+  const run = opts.run ?? ((entry: Entry, input: unknown) => invoke(entry.endpoint, new Context(), input));
   const maxBody = opts.maxBodyBytes ?? 1_000_000;
 
   return http.createServer(async (req, res) => {
@@ -55,7 +63,7 @@ export function createServer(entries: Entry[], opts: ServeOptions = {}): http.Se
           return send(400, { error: { code: "bad_json", message: "body is not valid JSON" } });
         }
       }
-      const data = await invoke(entry.endpoint, makeContext(), input);
+      const data = await run(entry, input);
       return send(200, { data });
     } catch (err) {
       if (err instanceof EndpointError) {

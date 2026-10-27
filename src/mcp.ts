@@ -10,7 +10,10 @@ export function toolName(id: string): string {
   return `${site!.replace(/[^A-Za-z0-9-]/g, "_")}__${name!.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(0, 64);
 }
 
-export function buildMcpServer(entries: Entry[], makeContext: () => Context = () => new Context()): McpServer {
+export function buildMcpServer(
+  entries: Entry[],
+  run: (entry: Entry, input: unknown) => Promise<unknown> = (entry, input) => invoke(entry.endpoint, new Context(), input),
+): McpServer {
   const server = new McpServer({ name: "sitescrape", version: "0.1.0" });
   for (const entry of entries) {
     const { endpoint } = entry;
@@ -27,7 +30,7 @@ export function buildMcpServer(entries: Entry[], makeContext: () => Context = ()
       },
       async (args: unknown) => {
         try {
-          const data = await invoke(endpoint, makeContext(), args);
+          const data = await run(entry, args);
           return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
         } catch (err) {
           const message =

@@ -2,10 +2,10 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
-import { Context } from "./context.ts";
-import { EndpointError, invoke } from "./endpoint.ts";
-import { find, loadCatalog } from "./registry.ts";
-import { record, writeDigest } from "./record.ts";
+import { EndpointError } from "./endpoint.ts";
+import { find, loadCatalog, type Entry } from "./registry.ts";
+import { login, record, writeDigest } from "./record.ts";
+import { configFromEnv, runEntry, sessionStore, type RuntimeConfig } from "./runtime.ts";
 import { createServer } from "./serve.ts";
 import { buildMcpServer } from "./mcp.ts";
 
@@ -16,10 +16,17 @@ Usage:
   sitescrape digest <recording dir | file.har> [--host example.com]
   sitescrape list
   sitescrape call <site/endpoint> ['{"json":"input"}']
+  sitescrape login <url> [--site name]                log in by hand in a browser; cookies saved encrypted
+  sitescrape logout <site>
   sitescrape serve [--port 8787] [--host 127.0.0.1]   REST: GET / lists, POST /<site>/<endpoint> calls
   sitescrape mcp                                      MCP server on stdio, one tool per endpoint
 
-Env (.env is loaded if present): PROXY_URL, SITESCRAPE_CATALOG, SITESCRAPE_TOKEN (bearer token for serve)
+Env (.env is loaded if present):
+  PROXY_URL          http://user:pass@host:port; put {session} where your provider takes a session id
+  CAPTCHA_PROVIDER   anticaptcha | capmonster | 2captcha, with CAPTCHA_API_KEY
+  SESSION_KEY        16+ random chars, encrypts saved logins
+  SITESCRAPE_TOKEN   bearer token required by serve
+  SITESCRAPE_CATALOG, SITESCRAPE_SESSIONS   override the catalog and sessions folders
 `;
 
 const PKG_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -47,8 +54,13 @@ async function main(argv: string[]): Promise<number> {
       channel: { type: "string" },
       host: { type: "string", multiple: true },
       port: { type: "string" },
+      site: { type: "string" },
     },
   });
+
+  let cfg: RuntimeConfig | undefined;
+  const config = () => (cfg ??= configFromEnv());
+  const run = (entry: Entry, input: unknown) => runEntry(entry, input, config());
 
   switch (cmd) {
     case "record": {
@@ -60,7 +72,7 @@ async function main(argv: string[]): Promise<number> {
         headless: values.headless,
         seconds: values.seconds ? Number(values.seconds) : undefined,
         channel: values.channel,
-        proxyUrl: process.env.PROXY_URL || undefined,
+        proxyUrl: config().proxyUrl,
       });
       console.log(`saved ${rec.dir}\ndigest ${rec.digestPath}`);
       return 0;
@@ -69,13 +81,15 @@ async function main(argv: string[]): Promise<number> {
       const target = positionals[0];
       if (!target) return usage();
       const harPath = statSync(target).isDirectory() ? path.join(target, "network.har") : target;
-      const hosts = values.host ?? [];
-      console.log(await writeDigest(harPath, hosts));
+      console.log(await writeDigest(harPath, values.host ?? []));
       return 0;
     }
     case "list": {
       const entries = await loadCatalog(catalogDir());
-      for (const e of entries) console.log(`${e.id.padEnd(40)} ${e.endpoint.kind.padEnd(6)} ${e.endpoint.description}`);
+      for (const e of entries) {
+        const tags = [e.endpoint.kind, e.endpoint.session ? "login" : ""].filter(Boolean).join(",");
+        console.log(`${e.id.padEnd(40)} ${tags.padEnd(12)} ${e.endpoint.description}`);
+      }
       if (!entries.length) console.log(`no endpoints in ${catalogDir()}`);
       return 0;
     }
@@ -87,8 +101,27 @@ async function main(argv: string[]): Promise<number> {
         console.error(`unknown endpoint ${id}. Run: sitescrape list`);
         return 1;
       }
-      const result = await invoke(entry.endpoint, new Context(), raw ? JSON.parse(raw) : {});
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify(await run(entry, raw ? JSON.parse(raw) : {}), null, 2));
+      return 0;
+    }
+    case "login": {
+      const url = positionals[0];
+      if (!url) return usage();
+      const site = await login({
+        url,
+        site: values.site,
+        channel: values.channel,
+        store: sessionStore(config()),
+        proxyUrl: config().proxyUrl,
+      });
+      console.log(`saved login for ${site}. Endpoints in catalog/${site}/ with session: true will use it.`);
+      return 0;
+    }
+    case "logout": {
+      const site = positionals[0];
+      if (!site) return usage();
+      await sessionStore(config()).remove(site);
+      console.log(`removed login for ${site}`);
       return 0;
     }
     case "serve": {
@@ -100,7 +133,8 @@ async function main(argv: string[]): Promise<number> {
         console.error("refusing to listen on a public interface without SITESCRAPE_TOKEN");
         return 1;
       }
-      createServer(entries, { token }).listen(port, host, () => {
+      config();
+      createServer(entries, { token, run }).listen(port, host, () => {
         console.log(`sitescrape serving ${entries.length} endpoints on http://${host}:${port}`);
       });
       return new Promise<number>(() => {});
@@ -108,7 +142,8 @@ async function main(argv: string[]): Promise<number> {
     case "mcp": {
       const { serveStdio } = await import("@modelcontextprotocol/server/stdio");
       const entries = await loadCatalog(catalogDir());
-      serveStdio(() => buildMcpServer(entries));
+      config();
+      serveStdio(() => buildMcpServer(entries, run));
       return new Promise<number>(() => {});
     }
     default:
@@ -133,4 +168,3 @@ main(process.argv.slice(2)).then(
     process.exit(1);
   },
 );
-

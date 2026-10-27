@@ -3,6 +3,8 @@ import path from "node:path";
 import readline from "node:readline";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { digestHar, renderDigest, type Har } from "./har.ts";
+import { newSessionId, resolveProxyUrl } from "./proxy.ts";
+import { jarFromBrowserCookies, type BrowserCookie, type SessionStore } from "./session.ts";
 
 export interface RecordOptions {
   url: string;
@@ -63,8 +65,41 @@ export async function writeDigest(harPath: string, hosts: string[], task?: strin
   return out;
 }
 
-async function launch(opts: RecordOptions): Promise<Browser> {
-  const proxy = opts.proxyUrl ? parseProxy(opts.proxyUrl) : undefined;
+export interface LoginOptions {
+  url: string;
+  /** Session name; must match the catalog folder. Defaults to the host without "www.". */
+  site?: string;
+  channel?: string;
+  proxyUrl?: string;
+  store: SessionStore;
+}
+
+/**
+ * Open a real browser, let the user log in by hand (2FA and captchas included), then save the
+ * cookies encrypted together with the proxy session id and user agent, so later calls look like
+ * the same browser on the same IP.
+ */
+export async function login(opts: LoginOptions): Promise<string> {
+  const site = (opts.site ?? new URL(opts.url).hostname.replace(/^www\./, "")).toLowerCase();
+  const proxySession = newSessionId();
+  const browser = await launch({ url: opts.url, channel: opts.channel, proxyUrl: opts.proxyUrl, proxySession });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(opts.url, { waitUntil: "domcontentloaded" });
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  console.log("Log in in the browser window. Press Enter here when you are logged in.");
+  await waitForEnterOrClose(context);
+  const { cookies } = await context.storageState();
+  await context.close();
+  await browser.close();
+
+  const jar = await jarFromBrowserCookies(cookies as BrowserCookie[]);
+  await opts.store.save({ site, jar: await jar.serialize(), proxySession, userAgent, savedAt: new Date().toISOString() });
+  return site;
+}
+
+async function launch(opts: Pick<RecordOptions, "url" | "headless" | "channel" | "proxyUrl"> & { proxySession?: string }): Promise<Browser> {
+  const proxy = opts.proxyUrl ? parseProxy(resolveProxyUrl(opts.proxyUrl, opts.proxySession)) : undefined;
   const channels = opts.channel ? [opts.channel] : [undefined, "chrome", "msedge"];
   let lastError: unknown;
   for (const channel of channels) {
