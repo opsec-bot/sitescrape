@@ -12,7 +12,7 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 }
 ```
 
-> Early work in progress. Recording, digesting, calling, the REST server and the MCP server work. Proxy and captcha support, logins and self-healing are next.
+> Early work in progress. Recording, digesting, calling, REST, MCP, proxies, captcha solving and saved logins work. Health checks and self-healing are next.
 
 ## How it works
 
@@ -40,6 +40,8 @@ node bin/sitescrape.mjs list
 | `digest <dir or .har> [--host example.com]` | Rebuild `digest.md` for a recording |
 | `list` | List catalog endpoints |
 | `call <site>/<name> [json]` | Run an endpoint |
+| `login <url> [--site name]` | Log in by hand in a browser; cookies saved encrypted for endpoints with `session: true` |
+| `logout <site>` | Delete a saved login |
 | `serve [--port 8787] [--host 127.0.0.1]` | REST server: `GET /` lists endpoints with JSON Schema, `POST /<site>/<name>` calls one |
 | `mcp` | MCP server on stdio, one tool per endpoint |
 
@@ -62,6 +64,16 @@ $ curl -X POST localhost:8787/resy.com/search -d '{"query":"pizza","city":"new-y
 ```
 
 Errors come back as `{"error":{"code","message"}}` with status 400 (bad input), 404 (unknown endpoint or missing item), 502 (site error or the site changed shape). Set `SITESCRAPE_TOKEN` to require `Authorization: Bearer <token>`; the server refuses to bind to a non-local address without it.
+
+## Proxies, captchas and logins
+
+Bring your own services. Settings go in `.env` (see `.env.example`); nothing is sent anywhere else.
+
+- **Proxy:** `PROXY_URL=http://user:pass@gate.example.com:7000`. If your provider takes a session id in the username, write `{session}` there. Calls then rotate IPs, and logged-in sites keep the IP they logged in from.
+- **Captcha:** `CAPTCHA_PROVIDER=anticaptcha|capmonster|2captcha` and `CAPTCHA_API_KEY`. Endpoints call `ctx.solveCaptcha({ type, websiteURL, websiteKey })` for reCAPTCHA v2/v3, hCaptcha, Turnstile, or `{ type: "image", body }`. You pay the provider per solve.
+- **Logins:** set `SESSION_KEY`, then `sitescrape login https://site.com/`. A browser opens and you log in yourself, so 2FA and captchas work. sitescrape never sees your password. Cookies, user agent and proxy session are saved AES-256-GCM encrypted in `sessions/`, refreshed after each call. Use test accounts.
+
+Not covered: fingerprint-based bot detection with no captcha to solve.
 
 ## Writing an endpoint
 
