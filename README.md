@@ -12,7 +12,7 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 }
 ```
 
-> Early work in progress. Recording, digesting, calling, REST, MCP, proxies, captcha solving and saved logins work. Health checks and self-healing are next.
+> Early work in progress, not yet v1. Recording, digesting, calling, REST, MCP, proxies, captcha solving, saved logins, health checks and self-healing all work.
 
 ## How it works
 
@@ -42,6 +42,8 @@ node bin/sitescrape.mjs list
 | `call <site>/<name> [json]` | Run an endpoint |
 | `login <url> [--site name]` | Log in by hand in a browser; cookies saved encrypted for endpoints with `session: true` |
 | `logout <site>` | Delete a saved login |
+| `probe [site or id ...] [--json] [--heal]` | Run every endpoint's example and record if it still works |
+| `heal <site>/<name>` | Re-record the site and let Claude Code patch a broken endpoint |
 | `serve [--port 8787] [--host 127.0.0.1]` | REST server: `GET /` lists endpoints with JSON Schema, `POST /<site>/<name>` calls one |
 | `mcp` | MCP server on stdio, one tool per endpoint |
 
@@ -74,6 +76,18 @@ Bring your own services. Settings go in `.env` (see `.env.example`); nothing is 
 - **Logins:** set `SESSION_KEY`, then `sitescrape login https://site.com/`. A browser opens and you log in yourself, so 2FA and captchas work. sitescrape never sees your password. Cookies, user agent and proxy session are saved AES-256-GCM encrypted in `sessions/`, refreshed after each call. Use test accounts.
 
 Not covered: fingerprint-based bot detection with no captcha to solve.
+
+## Health checks and self-healing
+
+`sitescrape probe` runs each endpoint's `example` input and checks the output still matches the schema. Results go to `.sitescrape/status.json` and show in `sitescrape list`. Action endpoints are never run automatically. Logged-in endpoints are skipped until you have a saved login.
+
+When a site changes, `sitescrape heal <id>` (or `probe --heal`):
+
+1. records the endpoint's `source` page again (headless),
+2. runs Claude Code headless (`claude -p`, your own subscription) with the failure, the fresh digest and the rendered HTML, allowed to edit only that site's folder,
+3. probes again in a fresh process. Passing: the edit stays for you to review with `git diff`. Still failing: every file is put back.
+
+Nothing is committed for you. To check daily, schedule `sitescrape probe --heal` with cron or Windows Task Scheduler.
 
 ## Writing an endpoint
 
