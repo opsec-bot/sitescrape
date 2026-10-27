@@ -12,6 +12,8 @@ export interface EndpointDef<I extends z.ZodType, O extends z.ZodType> {
   output: O;
   /** Input used by `sitescrape probe` to check the endpoint still works. */
   example: z.input<I>;
+  /** Page to re-record when `sitescrape heal` repairs this endpoint. Defaults to the site's homepage. */
+  source?: string;
   run(ctx: Context, input: z.output<I>): Promise<z.input<O>>;
 }
 
