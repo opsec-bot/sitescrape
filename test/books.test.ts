@@ -76,6 +76,10 @@ describe("books.toscrape.com", () => {
 
   it("is discovered by the catalog loader", async () => {
     const ids = (await loadCatalog(path.join(import.meta.dirname, "..", "catalog"))).map((e) => e.id);
-    expect(ids).toEqual(["books.toscrape.com/book", "books.toscrape.com/list", "books.toscrape.com/search"]);
+    expect(ids.filter((id) => id.startsWith("books.toscrape.com/"))).toEqual([
+      "books.toscrape.com/book",
+      "books.toscrape.com/list",
+      "books.toscrape.com/search",
+    ]);
   });
 });
