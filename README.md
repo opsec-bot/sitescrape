@@ -12,7 +12,7 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 }
 ```
 
-> Early work in progress. Recording, digesting and calling work. REST server, MCP server, proxy and captcha support, logins and self-healing are next.
+> Early work in progress. Recording, digesting, calling, the REST server and the MCP server work. Proxy and captcha support, logins and self-healing are next.
 
 ## How it works
 
@@ -40,6 +40,28 @@ node bin/sitescrape.mjs list
 | `digest <dir or .har> [--host example.com]` | Rebuild `digest.md` for a recording |
 | `list` | List catalog endpoints |
 | `call <site>/<name> [json]` | Run an endpoint |
+| `serve [--port 8787] [--host 127.0.0.1]` | REST server: `GET /` lists endpoints with JSON Schema, `POST /<site>/<name>` calls one |
+| `mcp` | MCP server on stdio, one tool per endpoint |
+
+## Use from an agent
+
+Every endpoint becomes an MCP tool (`books.toscrape.com/search` is `books_toscrape_com__search`). For Claude Code:
+
+```
+claude mcp add sitescrape -- node /path/to/sitescrape/bin/sitescrape.mjs mcp
+```
+
+Read endpoints are marked read-only; action endpoints are marked destructive so the client asks before running them.
+
+## REST
+
+```
+$ sitescrape serve
+$ curl -X POST localhost:8787/resy.com/search -d '{"query":"pizza","city":"new-york-ny"}'
+{"data":{"query":"pizza","total":81,"venues":[{"name":"Crazy Pizza","neighborhood":"SoHo","price_range":2,"rating":4.2, ...}]}}
+```
+
+Errors come back as `{"error":{"code","message"}}` with status 400 (bad input), 404 (unknown endpoint or missing item), 502 (site error or the site changed shape). Set `SITESCRAPE_TOKEN` to require `Authorization: Bearer <token>`; the server refuses to bind to a non-local address without it.
 
 ## Writing an endpoint
 
