@@ -14,7 +14,7 @@ export function buildMcpServer(
   entries: Entry[],
   run: (entry: Entry, input: unknown) => Promise<unknown> = (entry, input) => invoke(entry.endpoint, new Context(), input),
 ): McpServer {
-  const server = new McpServer({ name: "sitescrape", version: "0.1.0" });
+  const server = new McpServer({ name: "sitescrape", version: "1.0.0" });
   for (const entry of entries) {
     const { endpoint } = entry;
     server.registerTool(
