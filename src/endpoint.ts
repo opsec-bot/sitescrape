@@ -6,6 +6,8 @@ export interface EndpointDef<I extends z.ZodType, O extends z.ZodType> {
   description: string;
   /** "read" endpoints only fetch data. "action" endpoints change something on the site. */
   kind?: "read" | "action";
+  /** Needs a saved login (`sitescrape login <url>`). Cookies and the sticky proxy IP are loaded and saved around each call. */
+  session?: boolean;
   input: I;
   output: O;
   /** Input used by `sitescrape probe` to check the endpoint still works. */
@@ -24,7 +26,7 @@ export function defineEndpoint<I extends z.ZodType, O extends z.ZodType>(
   return { kind: "read", ...def };
 }
 
-export type ErrorCode = "bad_input" | "bad_output" | "upstream" | "not_found";
+export type ErrorCode = "bad_input" | "bad_output" | "upstream" | "not_found" | "auth_required" | "config";
 
 export class EndpointError extends Error {
   constructor(
