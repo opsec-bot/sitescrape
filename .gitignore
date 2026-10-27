@@ -2,3 +2,4 @@ node_modules/
 recordings/
 .env
 *.har
+sessions/
