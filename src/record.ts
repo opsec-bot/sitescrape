@@ -43,6 +43,8 @@ export async function record(opts: RecordOptions): Promise<Recording> {
     await waitForEnterOrClose(context);
   }
 
+  // Rendered DOM, for sites whose data is in the HTML rather than in JSON calls.
+  await writeFile(path.join(dir, "page.html"), await page.content()).catch(() => {});
   // Cookies stay on disk next to the HAR (recordings/ is git-ignored) so authenticated endpoints can reuse them.
   await context.storageState({ path: path.join(dir, "state.json") }).catch(() => {});
   await context.close();
