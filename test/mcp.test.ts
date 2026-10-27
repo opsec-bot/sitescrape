@@ -43,7 +43,7 @@ describe("sitescrape mcp", () => {
 
       const { result } = await rpc("tools/list", {});
       const names = result.tools.map((t: any) => t.name);
-      expect(names).toEqual(expect.arrayContaining(["books_toscrape_com__book", "books_toscrape_com__search", "resy_com__search"]));
+      expect(names).toEqual(["books_toscrape_com__book", "books_toscrape_com__list", "books_toscrape_com__search"]);
       expect(result.tools.every((t: any) => t.annotations.readOnlyHint)).toBe(true);
 
       // invalid input is rejected before the endpoint runs, so no network call happens

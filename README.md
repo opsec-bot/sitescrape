@@ -61,8 +61,8 @@ Read endpoints are marked read-only; action endpoints are marked destructive so 
 
 ```
 $ sitescrape serve
-$ curl -X POST localhost:8787/resy.com/search -d '{"query":"pizza","city":"new-york-ny"}'
-{"data":{"query":"pizza","total":81,"venues":[{"name":"Crazy Pizza","neighborhood":"SoHo","price_range":2,"rating":4.2, ...}]}}
+$ curl -X POST localhost:8787/books.toscrape.com/book -d '{"id":"a-light-in-the-attic_1000"}'
+{"data":{"id":"a-light-in-the-attic_1000","title":"A Light in the Attic","category":"Poetry","price":51.77,"available":22, ...}}
 ```
 
 Errors come back as `{"error":{"code","message"}}` with status 400 (bad input), 404 (unknown endpoint or missing item), 502 (site error or the site changed shape). Set `SITESCRAPE_TOKEN` to require `Authorization: Bearer <token>`; the server refuses to bind to a non-local address without it.
@@ -89,11 +89,14 @@ When a site changes, `sitescrape heal <id>` (or `probe --heal`):
 
 Nothing is committed for you. To check daily, schedule `sitescrape probe --heal` with cron or Windows Task Scheduler.
 
+## Catalog
+
+This repo ships one example site, `books.toscrape.com` (a sandbox built for scraping practice). Endpoints for real sites live in a separate catalog repo: install sitescrape there and run it from that folder, or point `SITESCRAPE_CATALOG` at its `catalog/` directory. Fork it to change an endpoint, open a pull request to share one.
+
 ## Writing an endpoint
 
 ```ts
-import { z } from "zod";
-import { defineEndpoint } from "../../src/endpoint.ts";
+import { defineEndpoint, z } from "sitescrape";
 
 export default defineEndpoint({
   description: "One page of the book catalogue.",
