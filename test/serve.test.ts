@@ -70,10 +70,29 @@ describe("REST server", () => {
     expect(JSON.stringify(await res.json())).not.toContain("boom");
   });
 
+  it("takes GET with query params for read endpoints", async () => {
+    const res = await fetch((await start()) + "/example.com/echo?name=ab&times=3");
+    expect(await res.json()).toEqual({ data: { text: "ababab" } });
+  });
+
+  it("serves an OpenAPI spec, the playground and snippets", async () => {
+    const base = await start();
+    const spec = await (await fetch(base + "/openapi.json")).json();
+    expect(spec.openapi).toBe("3.1.0");
+    expect(spec.paths["/example.com/echo"].get).toBeDefined();
+    const page = await fetch(base + "/playground");
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("sitescrape playground");
+    const snips = await (await post(base, "/_snippets/example.com/echo", '{"name":"z"}')).json();
+    expect(snips.curl).toContain(`${base}/example.com/echo`);
+  });
+
   it("requires the bearer token when one is set", async () => {
     const base = await start("s3cret-token");
     expect((await fetch(base)).status).toBe(401);
     expect((await fetch(base, { headers: { authorization: "Bearer wrong-token!" } })).status).toBe(401);
     expect((await fetch(base, { headers: { authorization: "Bearer s3cret-token" } })).status).toBe(200);
+    expect((await fetch(base + "/openapi.json")).status).toBe(401);
+    expect((await fetch(base + "/playground")).status).toBe(200);
   });
 });

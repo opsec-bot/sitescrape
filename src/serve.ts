@@ -1,9 +1,12 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { z } from "zod";
 import { Context } from "./context.ts";
+import { coerceQuery, describeCatalog, inputSchema, openapi, snippets } from "./docs.ts";
 import { EndpointError, invoke, type ErrorCode } from "./endpoint.ts";
+import { PLAYGROUND_HTML } from "./playground.ts";
 import { find, type Entry } from "./registry.ts";
+
+export { describeCatalog };
 
 export interface ServeOptions {
   /** When set, every request must send `Authorization: Bearer <token>`. */
@@ -11,6 +14,8 @@ export interface ServeOptions {
   /** How a call runs. Defaults to a plain context; the CLI passes the proxy/captcha/session runtime. */
   run?: (entry: Entry, input: unknown) => Promise<unknown>;
   maxBodyBytes?: number;
+  /** Version shown in the OpenAPI spec. */
+  version?: string;
 }
 
 const STATUS: Record<ErrorCode, number> = {
@@ -21,18 +26,6 @@ const STATUS: Record<ErrorCode, number> = {
   upstream: 502,
   config: 500,
 };
-
-/** JSON Schema view of the catalog, used by GET / and handy for generating clients. */
-export function describeCatalog(entries: Entry[]) {
-  return entries.map((e) => ({
-    id: e.id,
-    kind: e.endpoint.kind,
-    description: e.endpoint.description,
-    input: z.toJSONSchema(e.endpoint.input, { io: "input" }),
-    output: z.toJSONSchema(e.endpoint.output),
-    example: e.endpoint.example,
-  }));
-}
 
 async function defaultRun(entry: Entry, input: unknown): Promise<unknown> {
   const ctx = new Context();
@@ -53,25 +46,43 @@ export function createServer(entries: Entry[], opts: ServeOptions = {}): http.Se
       res.end(JSON.stringify(body));
     };
     try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      // The playground page holds no data, so it loads without the token and asks for it.
+      if (req.method === "GET" && url.pathname === "/playground") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return res.end(PLAYGROUND_HTML);
+      }
       if (opts.token && !authorized(req.headers.authorization, opts.token)) {
         return send(401, { error: { code: "unauthorized", message: "missing or wrong bearer token" } });
       }
-      const url = new URL(req.url ?? "/", "http://localhost");
+      const base = `http://${req.headers.host ?? "127.0.0.1"}`;
       if (req.method === "GET" && url.pathname === "/") return send(200, { endpoints: describeCatalog(entries) });
-      if (req.method !== "POST") return send(405, { error: { code: "method_not_allowed", message: "use POST /<site>/<endpoint>" } });
+      if (req.method === "GET" && url.pathname === "/openapi.json") return send(200, openapi(entries, base, opts.version));
 
-      const entry = find(entries, decodeURIComponent(url.pathname.slice(1)));
-      if (!entry) return send(404, { error: { code: "unknown_endpoint", message: `no endpoint ${url.pathname}` } });
+      const snippetFor = url.pathname.startsWith("/_snippets/");
+      const id = decodeURIComponent(url.pathname.slice(snippetFor ? "/_snippets/".length : 1));
+      const entry = find(entries, id);
+      if (!entry) return send(404, { error: { code: "unknown_endpoint", message: `no endpoint /${id}` } });
 
-      const raw = await readBody(req, maxBody);
       let input: unknown = {};
-      if (raw.trim()) {
-        try {
-          input = JSON.parse(raw);
-        } catch {
-          return send(400, { error: { code: "bad_json", message: "body is not valid JSON" } });
+      if (req.method === "GET") {
+        if (snippetFor || entry.endpoint.kind !== "read") {
+          return send(405, { error: { code: "method_not_allowed", message: "action endpoints only take POST" } });
         }
+        input = coerceQuery(url.searchParams, inputSchema(entry));
+      } else if (req.method === "POST") {
+        const raw = await readBody(req, maxBody);
+        if (raw.trim()) {
+          try {
+            input = JSON.parse(raw);
+          } catch {
+            return send(400, { error: { code: "bad_json", message: "body is not valid JSON" } });
+          }
+        }
+      } else {
+        return send(405, { error: { code: "method_not_allowed", message: "use GET or POST /<site>/<endpoint>" } });
       }
+      if (snippetFor) return send(200, snippets(entry.id, input, base));
       const data = await run(entry, input);
       return send(200, { data });
     } catch (err) {
