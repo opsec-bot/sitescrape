@@ -110,6 +110,8 @@ export default defineEndpoint({
 
 `ctx.json()`, `ctx.text()` and `ctx.html()` retry network errors and 429/5xx responses.
 
+For sites whose data only exists after their JavaScript runs (SPAs, Blazor/websocket apps), `await ctx.page()` gives a Playwright page that reuses the proxy, session and user agent; it's closed after the call. It's slow, so use it only when the data isn't reachable over HTTP. `SITESCRAPE_CHANNEL` forces an installed browser (`chrome` or `msedge`) instead of bundled Chromium.
+
 ## Responsible use
 
 Check a site's terms before automating it. Logged-in and action endpoints should use test accounts. sitescrape does not include bot-detection bypasses.
