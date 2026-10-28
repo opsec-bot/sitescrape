@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
-import { chromium, type Browser, type BrowserContext } from "playwright";
+import { type BrowserContext } from "playwright";
+import { launchBrowser } from "./browser.ts";
 import { digestHar, renderDigest, type Har } from "./har.ts";
-import { newSessionId, resolveProxyUrl } from "./proxy.ts";
+import { newSessionId } from "./proxy.ts";
 import { jarFromBrowserCookies, type BrowserCookie, type SessionStore } from "./session.ts";
 
 export interface RecordOptions {
@@ -31,7 +32,7 @@ export async function record(opts: RecordOptions): Promise<Recording> {
   await mkdir(dir, { recursive: true });
   const harPath = path.join(dir, "network.har");
 
-  const browser = await launch(opts);
+  const browser = await launchBrowser({ headless: opts.headless ?? false, channel: opts.channel, proxyUrl: opts.proxyUrl });
   const context = await browser.newContext({ recordHar: { path: harPath, content: "embed" } });
   const page = await context.newPage();
   await page.goto(opts.url, { waitUntil: "domcontentloaded" });
@@ -84,7 +85,7 @@ export interface LoginOptions {
 export async function login(opts: LoginOptions): Promise<string> {
   const site = (opts.site ?? new URL(opts.url).hostname.replace(/^www\./, "")).toLowerCase();
   const proxySession = newSessionId();
-  const browser = await launch({ url: opts.url, channel: opts.channel, proxyUrl: opts.proxyUrl, proxySession });
+  const browser = await launchBrowser({ headless: false, channel: opts.channel, proxyUrl: opts.proxyUrl, proxySession });
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(opts.url, { waitUntil: "domcontentloaded" });
@@ -98,30 +99,6 @@ export async function login(opts: LoginOptions): Promise<string> {
   const jar = await jarFromBrowserCookies(cookies as BrowserCookie[]);
   await opts.store.save({ site, jar: await jar.serialize(), proxySession, userAgent, savedAt: new Date().toISOString() });
   return site;
-}
-
-async function launch(opts: Pick<RecordOptions, "url" | "headless" | "channel" | "proxyUrl"> & { proxySession?: string }): Promise<Browser> {
-  const proxy = opts.proxyUrl ? parseProxy(resolveProxyUrl(opts.proxyUrl, opts.proxySession)) : undefined;
-  const channels = opts.channel ? [opts.channel] : [undefined, "chrome", "msedge"];
-  let lastError: unknown;
-  for (const channel of channels) {
-    try {
-      return await chromium.launch({ headless: opts.headless ?? false, channel, proxy });
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError;
-}
-
-export function parseProxy(raw: string): { server: string; username?: string; password?: string } {
-  const u = new URL(raw);
-  const server = `${u.protocol}//${u.host}`;
-  return {
-    server,
-    username: u.username ? decodeURIComponent(u.username) : undefined,
-    password: u.password ? decodeURIComponent(u.password) : undefined,
-  };
 }
 
 /** "www.shop.example.co" -> "example.co"; good enough to keep same-site API subdomains. */
