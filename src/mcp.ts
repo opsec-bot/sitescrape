@@ -10,9 +10,18 @@ export function toolName(id: string): string {
   return `${site!.replace(/[^A-Za-z0-9-]/g, "_")}__${name!.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(0, 64);
 }
 
+async function defaultRun(entry: Entry, input: unknown): Promise<unknown> {
+  const ctx = new Context();
+  try {
+    return await invoke(entry.endpoint, ctx, input);
+  } finally {
+    await ctx.close();
+  }
+}
+
 export function buildMcpServer(
   entries: Entry[],
-  run: (entry: Entry, input: unknown) => Promise<unknown> = (entry, input) => invoke(entry.endpoint, new Context(), input),
+  run: (entry: Entry, input: unknown) => Promise<unknown> = defaultRun,
 ): McpServer {
   const server = new McpServer({ name: "sitescrape", version: "1.0.0" });
   for (const entry of entries) {

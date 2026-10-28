@@ -1,5 +1,7 @@
 import * as cheerio from "cheerio";
+import type { Browser, Page } from "playwright";
 import type { CookieJar } from "tough-cookie";
+import { launchBrowser } from "./browser.ts";
 import type { CaptchaSolver, CaptchaTask } from "./captcha.ts";
 import { EndpointError } from "./endpoint.ts";
 
@@ -16,6 +18,11 @@ export interface ContextOptions {
   /** Cookies sent with matching requests and updated from Set-Cookie. */
   jar?: CookieJar;
   captcha?: CaptchaSolver;
+  /** Proxy URL template for the browser launched by `page()`; the sticky session is substituted in. */
+  proxyUrl?: string;
+  proxySession?: string;
+  /** Browser channel for `page()`, e.g. "chrome" or "msedge". */
+  channel?: string;
 }
 
 const DEFAULT_HEADERS = {
@@ -33,6 +40,10 @@ export class Context {
   private readonly backoffMs: number;
   readonly jar?: CookieJar;
   private readonly solver?: CaptchaSolver;
+  private readonly proxyUrl?: string;
+  private readonly proxySession?: string;
+  private readonly channel?: string;
+  private browserPromise?: Promise<Browser>;
 
   constructor(opts: ContextOptions = {}) {
     this.doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
@@ -41,6 +52,9 @@ export class Context {
     this.backoffMs = opts.backoffMs ?? 500;
     this.jar = opts.jar;
     this.solver = opts.captcha;
+    this.proxyUrl = opts.proxyUrl;
+    this.proxySession = opts.proxySession;
+    this.channel = opts.channel;
   }
 
   /** Solve a captcha with the configured provider (CAPTCHA_PROVIDER + CAPTCHA_API_KEY). */
@@ -87,6 +101,38 @@ export class Context {
     return cheerio.load(await this.text(url, init));
   }
 
+  /**
+   * A fresh browser page, for sites whose data only exists after client-side JS runs
+   * (SPAs, Blazor/websocket apps, heavy bot-scoring). The browser launches once per context,
+   * reuses the proxy, session and user-agent, and is closed by `close()`. Prefer `fetch`/`html`
+   * when the data is reachable over HTTP; a browser is the slow fallback.
+   */
+  async page(): Promise<Page> {
+    if (!this.browserPromise) {
+      this.browserPromise = launchBrowser({
+        headless: true,
+        channel: this.channel,
+        proxyUrl: this.proxyUrl,
+        proxySession: this.proxySession,
+      });
+    }
+    const browser = await this.browserPromise;
+    const browserContext = await browser.newContext({ userAgent: this.headers["user-agent"], locale: "en-US" });
+    if (this.jar) {
+      const cookies = await browserCookiesFromJar(this.jar);
+      if (cookies.length) await browserContext.addCookies(cookies);
+    }
+    return browserContext.newPage();
+  }
+
+  /** Close the browser launched by `page()`, if any. Always called at the end of a run. */
+  async close(): Promise<void> {
+    if (!this.browserPromise) return;
+    const browser = await this.browserPromise.catch(() => undefined);
+    this.browserPromise = undefined;
+    await browser?.close().catch(() => {});
+  }
+
   private async ok(url: string, init?: RequestInit): Promise<Response> {
     const res = await this.fetch(url, init);
     if (res.status === 404) throw new EndpointError(`not found: ${url}`, "not_found");
@@ -97,4 +143,41 @@ export class Context {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+interface PlaywrightCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+/** Best-effort tough-cookie jar -> Playwright cookies, so a browser `page()` reuses a saved login. */
+async function browserCookiesFromJar(jar: CookieJar): Promise<PlaywrightCookie[]> {
+  const serialized = (await jar.serialize()) as { cookies?: Array<Record<string, unknown>> };
+  const out: PlaywrightCookie[] = [];
+  for (const c of serialized.cookies ?? []) {
+    const domainRaw = typeof c.domain === "string" ? c.domain : undefined;
+    const name = typeof c.key === "string" ? c.key : undefined;
+    if (!domainRaw || !name) continue;
+    const domain = c.hostOnly === true ? domainRaw : domainRaw.startsWith(".") ? domainRaw : `.${domainRaw}`;
+    const sameSiteRaw = typeof c.sameSite === "string" ? c.sameSite.toLowerCase() : undefined;
+    const sameSite = sameSiteRaw === "strict" ? "Strict" : sameSiteRaw === "lax" ? "Lax" : sameSiteRaw === "none" ? "None" : undefined;
+    const expires = typeof c.expires === "string" && c.expires !== "Infinity" ? Math.floor(new Date(c.expires).getTime() / 1000) : undefined;
+    out.push({
+      name,
+      value: typeof c.value === "string" ? c.value : "",
+      domain,
+      path: typeof c.path === "string" ? c.path : "/",
+      ...(expires && Number.isFinite(expires) ? { expires } : {}),
+      httpOnly: c.httpOnly === true,
+      secure: c.secure === true,
+      ...(sameSite ? { sameSite } : {}),
+    });
+  }
+  return out;
 }

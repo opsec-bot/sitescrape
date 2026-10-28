@@ -34,8 +34,17 @@ export function describeCatalog(entries: Entry[]) {
   }));
 }
 
+async function defaultRun(entry: Entry, input: unknown): Promise<unknown> {
+  const ctx = new Context();
+  try {
+    return await invoke(entry.endpoint, ctx, input);
+  } finally {
+    await ctx.close();
+  }
+}
+
 export function createServer(entries: Entry[], opts: ServeOptions = {}): http.Server {
-  const run = opts.run ?? ((entry: Entry, input: unknown) => invoke(entry.endpoint, new Context(), input));
+  const run = opts.run ?? defaultRun;
   const maxBody = opts.maxBodyBytes ?? 1_000_000;
 
   return http.createServer(async (req, res) => {
