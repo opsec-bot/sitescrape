@@ -6,9 +6,12 @@ const CONCURRENCY = 5;
 
 export default defineEndpoint({
   description: "Find books whose title contains the query (case-insensitive).",
+  notes:
+    "The site has no search, so this scans catalogue pages 5 at a time and stops once it has `limit` matches. " +
+    "A rare title can mean reading all 50 pages (about 2-4 s). Matches titles only, not authors or descriptions.",
   input: z.object({
-    query: z.string().min(1),
-    limit: z.number().int().min(1).max(100).default(10),
+    query: z.string().min(1).describe("Text to look for in the title."),
+    limit: z.number().int().min(1).max(100).default(10).describe("Most results to return."),
   }),
   output: z.object({ query: z.string(), results: z.array(bookCard) }),
   example: { query: "light in the attic" },

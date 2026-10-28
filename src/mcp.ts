@@ -29,7 +29,9 @@ export function buildMcpServer(
     server.registerTool(
       toolName(entry.id),
       {
-        description: `${endpoint.description} (${entry.id})`,
+        description: `${endpoint.description} (${entry.id})${endpoint.notes ? `
+
+${endpoint.notes}` : ""}`,
         inputSchema: endpoint.input as z.ZodObject,
         annotations: {
           readOnlyHint: endpoint.kind === "read",
