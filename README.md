@@ -19,6 +19,8 @@ $ sitescrape call books.toscrape.com/search '{"query":"light in the attic"}'
 3. **Write the endpoint.** An agent (the `skill/` folder works with Claude Code) reads the digest and writes `catalog/<site>/<name>.ts`: zod input and output schemas plus a `run` function.
 4. **Call it.** `sitescrape call <site>/<name> '<json>'`. Input and output are validated, so a site redesign shows up as a `bad_output` error instead of silently wrong data.
 
+Steps 1 and 3 in one go: `sitescrape build <url> --task "what you want"` records, then runs Claude Code headless on your own plan to write and check the endpoints. Change one later in plain words with `sitescrape revise <site>/<name> "add a sort filter"`.
+
 ## Install
 
 Requires Node 22+.
@@ -38,11 +40,15 @@ node bin/sitescrape.mjs list
 | `digest <dir or .har> [--host example.com]` | Rebuild `digest.md` for a recording |
 | `list` | List catalog endpoints |
 | `call <site>/<name> [json]` | Run an endpoint |
+| `describe <site>/<name>` | Docs, inputs, outputs and copy-paste calls for one endpoint |
+| `openapi` | OpenAPI 3.1 spec of the catalog on stdout |
+| `build <url> --task "..." [--site name] [--seconds N]` | Record, then let Claude Code write the endpoints |
+| `revise <site>/<name> "<change>" [--record]` | Let Claude Code change an endpoint (add a field, a filter); `--record` re-records the site first |
 | `login <url> [--site name]` | Log in by hand in a browser; cookies saved encrypted for endpoints with `session: true` |
 | `logout <site>` | Delete a saved login |
 | `probe [site or id ...] [--json] [--heal]` | Run every endpoint's example and record if it still works |
 | `heal <site>/<name>` | Re-record the site and let Claude Code patch a broken endpoint |
-| `serve [--port 8787] [--host 127.0.0.1]` | REST server: `GET /` lists endpoints with JSON Schema, `POST /<site>/<name>` calls one |
+| `serve [--port 8787] [--host 127.0.0.1]` | REST server, playground at `/playground`, spec at `/openapi.json` |
 | `mcp` | MCP server on stdio, one tool per endpoint |
 
 ## Use from an agent
@@ -62,6 +68,14 @@ $ sitescrape serve
 $ curl -X POST localhost:8787/books.toscrape.com/book -d '{"id":"a-light-in-the-attic_1000"}'
 {"data":{"id":"a-light-in-the-attic_1000","title":"A Light in the Attic","category":"Poetry","price":51.77,"available":22, ...}}
 ```
+
+Read endpoints also take GET with query params, converted to the input schema's types (`?page=2&tag=a&tag=b`):
+
+```
+$ curl "localhost:8787/books.toscrape.com/search?query=attic&limit=1"
+```
+
+`GET /` lists every endpoint with JSON Schema, `GET /openapi.json` is an OpenAPI 3.1 spec for client generators, and `/playground` is a page to fill in inputs, send a call, see the response and copy it as cURL, Python or TypeScript. The playground page loads without the token and asks for it.
 
 Errors come back as `{"error":{"code","message"}}` with status 400 (bad input), 404 (unknown endpoint or missing item), 502 (site error or the site changed shape). Set `SITESCRAPE_TOKEN` to require `Authorization: Bearer <token>`; the server refuses to bind to a non-local address without it.
 
@@ -84,6 +98,8 @@ When a site changes, `sitescrape heal <id>` (or `probe --heal`):
 1. records the endpoint's `source` page again (headless),
 2. runs Claude Code headless (`claude -p`, your own subscription) with the failure, the fresh digest and the rendered HTML, allowed to edit only that site's folder,
 3. probes again in a fresh process. Passing: the edit stays for you to review with `git diff`. Still failing: every file is put back.
+
+`revise` and `build` work the same way: the agent may only touch that site's folder, the result is probed in a fresh process, and a failing result is rolled back. Run from a catalog repo, all three call the installed `npx sitescrape` and read its skill.
 
 Nothing is committed for you. To check daily, schedule `sitescrape probe --heal` with cron or Windows Task Scheduler.
 
