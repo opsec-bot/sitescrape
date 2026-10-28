@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import { createServer } from "./serve.ts";
 import { claudeRunner, heal } from "./heal.ts";
 import { mergeStatus, probe, readStatus, writeStatus, type ProbeResult } from "./probe.ts";
 import { buildMcpServer } from "./mcp.ts";
+import { describeText, openapi } from "./docs.ts";
 
 const HELP = `sitescrape: turn a website into a typed API
 
@@ -19,12 +20,14 @@ Usage:
   sitescrape digest <recording dir | file.har> [--host example.com]
   sitescrape list
   sitescrape call <site/endpoint> ['{"json":"input"}']
+  sitescrape describe <site/endpoint>                 docs, inputs, outputs and copy-paste calls
+  sitescrape openapi [--port 8787] [--host 127.0.0.1] OpenAPI 3.1 spec of the catalog on stdout
   sitescrape login <url> [--site name]                log in by hand in a browser; cookies saved encrypted
   sitescrape logout <site>
   sitescrape probe [site or site/endpoint ...] [--json] [--heal]
                                                       run each endpoint's example; --heal repairs failures
   sitescrape heal <site/endpoint>                     re-record the site and let Claude Code patch the endpoint
-  sitescrape serve [--port 8787] [--host 127.0.0.1]   REST: GET / lists, POST /<site>/<endpoint> calls
+  sitescrape serve [--port 8787] [--host 127.0.0.1]   REST + playground at /playground, spec at /openapi.json
   sitescrape mcp                                      MCP server on stdio, one tool per endpoint
 
 Env (.env is loaded if present):
@@ -36,6 +39,7 @@ Env (.env is loaded if present):
 `;
 
 const PKG_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const VERSION = (JSON.parse(readFileSync(path.join(PKG_ROOT, "package.json"), "utf8")) as { version: string }).version;
 const STATUS_FILE = path.resolve(".sitescrape", "status.json");
 
 function catalogDir(): string {
@@ -125,6 +129,22 @@ async function main(argv: string[]): Promise<number> {
       console.log(JSON.stringify(await run(entry, raw ? JSON.parse(raw) : {}), null, 2));
       return 0;
     }
+    case "describe": {
+      const id = positionals[0];
+      if (!id) return usage();
+      const entry = find(await loadCatalog(catalogDir()), id);
+      if (!entry) {
+        console.error(`unknown endpoint ${id}. Run: sitescrape list`);
+        return 1;
+      }
+      console.log(describeText(entry, `http://${values.host?.[0] ?? "127.0.0.1"}:${values.port ?? 8787}`));
+      return 0;
+    }
+    case "openapi": {
+      const base = `http://${values.host?.[0] ?? "127.0.0.1"}:${values.port ?? 8787}`;
+      console.log(JSON.stringify(openapi(await loadCatalog(catalogDir()), base, VERSION), null, 2));
+      return 0;
+    }
     case "probe": {
       const entries = select(await loadCatalog(catalogDir()), positionals);
       const previous = await readStatus(STATUS_FILE);
@@ -188,8 +208,9 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       config();
-      createServer(entries, { token, run }).listen(port, host, () => {
+      createServer(entries, { token, run, version: VERSION }).listen(port, host, () => {
         console.log(`sitescrape serving ${entries.length} endpoints on http://${host}:${port}`);
+        console.log(`playground: http://${host}:${port}/playground`);
       });
       return new Promise<number>(() => {});
     }

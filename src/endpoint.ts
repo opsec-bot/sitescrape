@@ -4,6 +4,11 @@ import type { Context } from "./context.ts";
 export interface EndpointDef<I extends z.ZodType, O extends z.ZodType> {
   /** One line, shown in `sitescrape list` and as the MCP tool description. */
   description: string;
+  /**
+   * Longer docs: what each call returns, paging, and what the site does not expose. Be honest about
+   * limits. Shown by `sitescrape describe`, the playground, OpenAPI and MCP.
+   */
+  notes?: string;
   /** "read" endpoints only fetch data. "action" endpoints change something on the site. */
   kind?: "read" | "action";
   /** Needs a saved login (`sitescrape login <url>`). Cookies and the sticky proxy IP are loaded and saved around each call. */
