@@ -12,6 +12,8 @@ export interface RuntimeConfig {
   captcha?: CaptchaSolver;
   sessionKey?: string;
   sessionDir: string;
+  /** Browser channel for endpoints that use `ctx.page()`, e.g. "chrome" or "msedge". */
+  channel?: string;
   /** Tests swap the network out; when set, the proxy is not used. */
   fetch?: FetchFn;
 }
@@ -27,6 +29,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeConf
     captcha: provider ? createSolver({ provider, apiKey: env.CAPTCHA_API_KEY! }) : undefined,
     sessionKey: env.SESSION_KEY || undefined,
     sessionDir: path.resolve(env.SITESCRAPE_SESSIONS ?? "sessions"),
+    channel: env.SITESCRAPE_CHANNEL?.trim() || undefined,
   };
 }
 
@@ -67,11 +70,15 @@ export async function runEntry(entry: Entry, input: unknown, cfg: RuntimeConfig)
     jar,
     captcha: cfg.captcha,
     headers: userAgent ? { "user-agent": userAgent } : undefined,
+    proxyUrl: cfg.fetch ? undefined : cfg.proxyUrl,
+    proxySession,
+    channel: cfg.channel,
   });
 
   try {
     return await invoke(endpoint, ctx, input);
   } finally {
+    await ctx.close();
     await proxy?.close();
     if (store && jar) {
       const saved = await store.load(siteKey(entry.site));
