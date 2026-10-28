@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { find, loadCatalog, type Entry } from "./registry.ts";
 import { login, record, writeDigest } from "./record.ts";
 import { configFromEnv, runEntry, sessionStore, type RuntimeConfig } from "./runtime.ts";
 import { createServer } from "./serve.ts";
-import { claudeRunner, heal } from "./heal.ts";
+import { agentEdit, buildBuildPrompt, buildRevisePrompt, claudeRunner, heal, REPO_TOOLS, type AgentTools } from "./heal.ts";
 import { mergeStatus, probe, readStatus, writeStatus, type ProbeResult } from "./probe.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { describeText, openapi } from "./docs.ts";
@@ -27,6 +27,10 @@ Usage:
   sitescrape probe [site or site/endpoint ...] [--json] [--heal]
                                                       run each endpoint's example; --heal repairs failures
   sitescrape heal <site/endpoint>                     re-record the site and let Claude Code patch the endpoint
+  sitescrape revise <site/endpoint> "<change>" [--record]
+                                                      ask Claude Code to change an endpoint (add a field, a filter...)
+  sitescrape build <url> --task "..." [--site name] [--seconds N]
+                                                      record, then let Claude Code write the endpoints
   sitescrape serve [--port 8787] [--host 127.0.0.1]   REST + playground at /playground, spec at /openapi.json
   sitescrape mcp                                      MCP server on stdio, one tool per endpoint
 
@@ -61,6 +65,7 @@ async function main(argv: string[]): Promise<number> {
     options: {
       task: { type: "string" },
       seconds: { type: "string" },
+      record: { type: "boolean" },
       headless: { type: "boolean" },
       channel: { type: "string" },
       host: { type: "string", multiple: true },
@@ -178,6 +183,61 @@ async function main(argv: string[]): Promise<number> {
       }
       return (await healOne(entry, current!)) ? 0 : 1;
     }
+    case "revise": {
+      const [id, request] = positionals;
+      if (!id || !request) return usage();
+      const entry = find(await loadCatalog(catalogDir()), id);
+      if (!entry) {
+        console.error(`unknown endpoint ${id}. Run: sitescrape list`);
+        return 1;
+      }
+      let digestPath: string | undefined;
+      if (values.record) {
+        const source = entry.endpoint.source ?? `https://${entry.site}/`;
+        console.log(`recording ${source}`);
+        digestPath = (await record({ url: source, task: request, channel: values.channel, proxyUrl: config().proxyUrl })).digestPath;
+      }
+      const tools = agentTools();
+      const prompt = buildRevisePrompt({ entry, request, repoRoot: process.cwd(), digestPath, tools });
+      const siteDir = path.dirname(entry.file);
+      const result = await agentEdit(siteDir, prompt, {
+        agent: claudeRunner,
+        cwd: process.cwd(),
+        cli: tools.cli,
+        verify: async (changed) => verifyFresh([entry.id, ...endpointIds(entry.site, changed)]),
+      });
+      return report(result, "revised", entry.id);
+    }
+    case "build": {
+      const url = positionals[0];
+      if (!url || !values.task) return usage();
+      const site = (values.site ?? new URL(url).hostname.replace(/^www\./, "")).toLowerCase();
+      const siteDir = path.join(catalogDir(), site);
+      const isNew = !existsSync(siteDir);
+      const rec = await record({
+        url,
+        task: values.task,
+        headless: values.headless,
+        seconds: values.seconds ? Number(values.seconds) : undefined,
+        channel: values.channel,
+        proxyUrl: config().proxyUrl,
+      });
+      console.log(`recorded ${rec.dir}. Writing endpoints with Claude Code...`);
+      const tools = agentTools();
+      const prompt = buildBuildPrompt({ site, task: values.task, siteDir, digestPath: rec.digestPath, repoRoot: process.cwd(), tools });
+      const result = await agentEdit(siteDir, prompt, {
+        agent: claudeRunner,
+        cwd: process.cwd(),
+        cli: tools.cli,
+        verify: async (changed) => {
+          const ids = endpointIds(site, changed);
+          if (!ids.length) return { id: site, status: "failed", ms: 0, last_verified: null, checked_at: new Date().toISOString(), error: { code: "no_endpoint", message: "no endpoint was written" } };
+          return verifyFresh(ids);
+        },
+      });
+      if (!result.ok && isNew && existsSync(siteDir) && !readdirSync(siteDir).length) rmdirSync(siteDir);
+      return report(result, "built", site);
+    }
     case "login": {
       const url = positionals[0];
       if (!url) return usage();
@@ -226,6 +286,41 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
+/** Run sitescrape from the repo the user is in: the source tree here, the installed package in a catalog repo. */
+function agentTools(): AgentTools {
+  const here = path.resolve(process.cwd());
+  const same = process.platform === "win32" ? here.toLowerCase() === PKG_ROOT.toLowerCase() : here === PKG_ROOT;
+  if (same) return REPO_TOOLS;
+  return { cli: "npx sitescrape", skill: path.relative(here, path.join(PKG_ROOT, "skill", "SKILL.md")).replaceAll("\\", "/") };
+}
+
+/** Endpoint ids for the endpoint files (not _helpers) among changed paths. */
+function endpointIds(site: string, files: string[]): string[] {
+  return files.map((f) => path.basename(f)).filter((f) => f.endsWith(".ts") && !f.startsWith("_") && !f.endsWith(".test.ts")).map((f) => `${site}/${f.slice(0, -3)}`);
+}
+
+/** Probe each id in a fresh process. Skipped (action or login needed) counts as passing, with a note. */
+async function verifyFresh(ids: string[]): Promise<ProbeResult> {
+  let last: ProbeResult | undefined;
+  for (const id of new Set(ids)) {
+    last = probeFresh(id);
+    if (last.status === "failed") return last;
+    if (last.status === "skipped") console.log(`note: ${id} not checked live (${last.reason})`);
+    else console.log(`ok ${id} (${last.ms} ms)`);
+  }
+  return { ...last!, status: "ok" };
+}
+
+function report(result: { ok: boolean; changed: string[]; agentSummary: string; error?: string }, verb: string, what: string): number {
+  if (result.ok) {
+    console.log(`${verb.toUpperCase()} ${what}. Changed: ${result.changed.map((f) => path.relative(process.cwd(), f)).join(", ") || "nothing"}. Review with git diff before committing.`);
+    console.log(result.agentSummary);
+    return 0;
+  }
+  console.log(`NOT ${verb.toUpperCase()} ${what}: ${result.error ?? "unknown"}. Files restored. Agent said: ${result.agentSummary}`);
+  return 1;
+}
+
 function formatResult(r: ProbeResult): string {
   const detail = r.status === "failed" ? `${r.error?.code}: ${r.error?.message}` : r.status === "skipped" ? r.reason : `${r.ms} ms`;
   return `${r.status.toUpperCase().padEnd(7)} ${r.id.padEnd(36)} ${detail}`;
@@ -247,7 +342,7 @@ async function healOne(entry: Entry, failure: ProbeResult): Promise<boolean> {
   console.log(`healing ${entry.id}: recording ${source}`);
   const rec = await record({ url: source, headless: true, seconds: 8, proxyUrl: configFromEnv().proxyUrl, task: entry.endpoint.description });
   const result = await heal(
-    { entry, failure, digestPath: rec.digestPath, repoRoot: process.cwd() },
+    { entry, failure, digestPath: rec.digestPath, repoRoot: process.cwd(), tools: agentTools() },
     { agent: claudeRunner, verify: async () => probeFresh(entry.id) },
   );
   if (result.fixed) {

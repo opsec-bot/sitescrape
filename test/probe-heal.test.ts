@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineEndpoint, EndpointError, type Endpoint } from "../src/endpoint.ts";
-import { buildHealPrompt, heal } from "../src/heal.ts";
+import { agentEdit, buildBuildPrompt, buildHealPrompt, buildRevisePrompt, heal } from "../src/heal.ts";
 import { mergeStatus, probe, type ProbeResult } from "../src/probe.ts";
 import type { Entry } from "../src/registry.ts";
 
@@ -161,5 +161,59 @@ describe("heal", () => {
     expect(prompt).toContain("recordings/a.com/t/page.html");
     expect(prompt).toContain(`npx tsx src/cli.ts call a.com/list '{"q":"a"}'`);
     expect(prompt).toContain("Failure: bad_output: drift");
+  });
+});
+
+describe("revise and build", () => {
+  const root = path.join(os.tmpdir(), "repo");
+  const tools = { cli: "npx sitescrape", skill: "node_modules/sitescrape/skill/SKILL.md" };
+
+  it("builds a revise prompt scoped to the site folder, with an optional recording", () => {
+    const e = entry("a.com/list", endpoint(), path.join(root, "catalog", "a.com", "list.ts"));
+    const plain = buildRevisePrompt({ entry: e, request: "add a sort filter", repoRoot: root, tools });
+    expect(plain).toContain("Change the sitescrape endpoint a.com/list: add a sort filter");
+    expect(plain).toContain("Only edit or add files in catalog/a.com/");
+    expect(plain).toContain("Read node_modules/sitescrape/skill/SKILL.md");
+    expect(plain).toContain("npx sitescrape call a.com/list");
+    expect(plain).not.toContain("digest");
+    const recorded = buildRevisePrompt({ entry: e, request: "x", repoRoot: root, digestPath: path.join(root, "recordings", "a.com", "t", "digest.md") });
+    expect(recorded).toContain("recordings/a.com/t/digest.md");
+  });
+
+  it("builds a build prompt that asks for notes and field docs", () => {
+    const prompt = buildBuildPrompt({
+      site: "a.com",
+      task: "return foreclosures",
+      siteDir: path.join(root, "catalog", "a.com"),
+      digestPath: path.join(root, "recordings", "a.com", "t", "digest.md"),
+      repoRoot: root,
+    });
+    expect(prompt).toContain("Goal: return foreclosures");
+    expect(prompt).toContain("Only write files in catalog/a.com/");
+    expect(prompt).toContain("`notes`");
+    expect(prompt).toContain("npx tsx src/cli.ts call a.com/<name>");
+  });
+
+  it("creates the folder, passes changed files to the check and removes new files on failure", async () => {
+    const dir = path.join(await mkdtemp(path.join(os.tmpdir(), "sitescrape-build-")), "catalog", "new.com");
+    let seen: string[] = [];
+    let cli: string | undefined;
+    const result = await agentEdit(dir, "p", {
+      cwd: dir,
+      cli: "npx sitescrape",
+      agent: async (_p, _cwd, c) => {
+        cli = c;
+        await writeFile(path.join(dir, "search.ts"), "x");
+        return "BUILT new.com/search";
+      },
+      verify: async (changed) => {
+        seen = changed;
+        return { status: "failed", error: { code: "bad_output", message: "empty" } } as ProbeResult;
+      },
+    });
+    expect(cli).toBe("npx sitescrape");
+    expect(seen).toEqual([path.join(dir, "search.ts")]);
+    expect(result).toMatchObject({ ok: false, error: "bad_output: empty" });
+    expect(await readdir(dir)).toEqual([]);
   });
 });
